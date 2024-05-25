@@ -17,6 +17,8 @@ from .model import *
 from app.services.chat_responses import *
 from app.services.user_types import *
 from app.config import *
+from PIL import Image
+from io import BytesIO
 
 conversation = []
 today = datetime.now().date()
@@ -257,30 +259,86 @@ def process_text_for_whatsapp(text):
 
     return whatsapp_style_text
 
+# def process_whatsapp_message(body):
+#     data = body
+#     print(data)
+#     try:
+#         phone_number_id =  [contact['wa_id'] for contact in data['entry'][0]['changes'][0]['value']['contacts']]
+#         messages_text = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
+#         profile_name = data['entry'][0]['changes'][0]['value']['contacts'][0]['profile']['name']
+
+#         wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
+#         name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
+#         message = body["entry"][0]["changes"][0]["value"]["messages"][0]
+#         message_body = message["text"]["body"]
+#         response = generate_response(message_body, phone_number_id, profile_name)
+#         data = get_text_message_input(phone_number_id, response,None,False)
+#         send_message(data)
+#     except Exception as e:
+#         pass
+
 def process_whatsapp_message(body):
     data = body
     try:
-        # phone_number_id = data['entry'][0]['changes'][0]['value']['metadata']['phone_number_id']
-        phone_number_id =  [contact['wa_id'] for contact in data['entry'][0]['changes'][0]['value']['contacts']]
-        # Extract messages text
+        phone_number_id = [contact['wa_id'] for contact in data['entry'][0]['changes'][0]['value']['contacts']]
+        
+        # Check if the message is an image
+        if 'messages' in data['entry'][0]['changes'][0]['value']:
+            for message in data['entry'][0]['changes'][0]['value']['messages']:
+                if message['type'] == 'image':
+                    # Get the image ID
+                    image_id = message['image']['id']
+                    print(image_id)
+                    
+                    # Construct the image URL using the Facebook Graph API endpoint
+                    image_url = f"https://graph.facebook.com/v16.0/{image_id}/image?access_token={current_app.config['ACCESS_TOKEN']}"
+                    print('url:',image_url)
+                    # Download the image
+                    response = requests.get(image_url)
+                    
+                    # Save the image in the same directory as the code
+                    image_format = message['image']['mime_type'].split('/')[1]
+                    image_filename = f"{image_id}.{image_format}"
+                    image_file_path = os.path.join(os.path.dirname(__file__), image_filename)
+                    with open(image_file_path, 'wb') as f:
+                        f.write(response.content)
+                    
+                    # Send the image back to the user
+                    data = get_image_message_input(phone_number_id, image_file_path)
+                    send_message(data)
+                    return
+        
+        # If the message is not an image, process it as before
         messages_text = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
-        # Extract profile name
         profile_name = data['entry'][0]['changes'][0]['value']['contacts'][0]['profile']['name']
-
         wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
         name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
         message = body["entry"][0]["changes"][0]["value"]["messages"][0]
         message_body = message["text"]["body"]
         response = generate_response(message_body, phone_number_id, profile_name)
-        # OpenAI Integration
-        # response = generate_response(message_body, wa_id, name)
-        # response = process_text_for_whatsapp(response)
-
-        # data = get_text_message_input(phone_number_id, response,"")
-        data = get_text_message_input(phone_number_id, response,None,False)
+        data = get_text_message_input(phone_number_id, response, None, False)
         send_message(data)
+        
     except Exception as e:
-        pass
+        print(f"Error processing message: {e}")
+
+def get_image_message_input(phone_number_id, image_file_path):
+    # Determine the image file extension
+    image_format = image_file_path.split('.')[-1]
+    
+    # Prepare the message data for sending an image
+    message_data = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": phone_number_id[0],
+        "type": "image",
+        "image": {
+            "link": f"file://{image_file_path}",
+            "caption": "Your image",
+            "filename": f"image.{image_format}"
+        }
+    }
+    return message_data
 
 def send_message_template(recepient):
     return json.dumps(
